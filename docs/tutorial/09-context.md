@@ -1,0 +1,378 @@
+# Chapter 3.3: Context - Passing Values Down the Tree
+
+Sometimes you need to share values across many operations without passing them as arguments everywhere. This is called "argument drilling" and it's painful:
+
+```typescript
+// argument-drilling.ts (DON'T DO THIS)
+function* handleRequest(config: Config, db: Database, logger: Logger) {
+  yield* validateUser(config, db, logger);
+  yield* processData(config, db, logger);
+  yield* sendResponse(config, db, logger);
+}
+
+function* validateUser(config: Config, db: Database, logger: Logger) {
+  yield* checkAuth(config, db, logger);  // Drilling down...
+}
+```
+
+Every function needs to pass everything to its children. Effection's **Context** solves this.
+
+---
+
+## Context: Ambient Values
+
+Context lets parent operations make values available to all descendants:
+
+```typescript
+// context-basics.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext } from 'effection';
+
+// 1. Create a context with a name (for debugging)
+const ConfigContext: Context<{ apiUrl: string }> = createContext<{ apiUrl: string }>('config');
+
+function* fetchData(): Operation<string> {
+  // 3. Access the context value from anywhere in the tree
+  const config = yield* ConfigContext;
+  console.log('Fetching from:', config.apiUrl);
+  return `Data from ${config.apiUrl}`;
+}
+
+function* processRequest(): Operation<void> {
+  // This operation doesn't need to know about config
+  const data: string = yield* fetchData();
+  console.log('Got:', data);
+}
+
+await main(function*() {
+  // 2. Set the context value
+  yield* ConfigContext.set({ apiUrl: 'https://api.example.com' });
+  
+  yield* processRequest();
+});
+```
+
+Output:
+```
+Fetching from: https://api.example.com
+Got: Data from https://api.example.com
+```
+
+---
+
+## The Three Steps
+
+1. **Create** a context with `createContext<T>(name)`
+2. **Set** the value with `yield* MyContext.set(value)`
+3. **Get** the value with `yield* MyContext`
+
+---
+
+## Context is Scoped
+
+Context values are bound to the scope where they're set. Child scopes can override:
+
+```typescript
+// context-scoped.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext, spawn, sleep } from 'effection';
+
+const ThemeContext: Context<string> = createContext<string>('theme');
+
+function* logTheme(label: string): Operation<void> {
+  const theme: string = yield* ThemeContext;
+  console.log(`${label}: theme is "${theme}"`);
+}
+
+await main(function*() {
+  yield* ThemeContext.set('light');
+  
+  yield* logTheme('main');  // "light"
+  
+  yield* spawn(function*(): Operation<void> {
+    // Child can override
+    yield* ThemeContext.set('dark');
+    yield* logTheme('child');  // "dark"
+    
+    yield* spawn(function*(): Operation<void> {
+      // Grandchild inherits from child
+      yield* logTheme('grandchild');  // "dark"
+    });
+  });
+  
+  // Parent is unaffected by child's override
+  yield* logTheme('main again');  // "light"
+  
+  yield* sleep(100);
+});
+```
+
+Output:
+```
+main: theme is "light"
+child: theme is "dark"
+grandchild: theme is "dark"
+main again: theme is "light"
+```
+
+---
+
+## Practical Example: Logger Context
+
+```typescript
+// logger-context.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext, spawn, sleep } from 'effection';
+
+interface Logger {
+  log: (message: string) => void;
+  error: (message: string) => void;
+}
+
+const LoggerContext: Context<Logger> = createContext<Logger>('logger');
+
+// Create a prefixed logger
+function createLogger(prefix: string): Logger {
+  return {
+    log: (msg: string) => console.log(`[${prefix}] ${msg}`),
+    error: (msg: string) => console.error(`[${prefix}] ERROR: ${msg}`),
+  };
+}
+
+function* doWork(): Operation<void> {
+  const logger: Logger = yield* LoggerContext;
+  logger.log('Starting work...');
+  yield* sleep(100);
+  logger.log('Work complete!');
+}
+
+function* handleRequest(requestId: string): Operation<void> {
+  // Create a request-specific logger
+  yield* LoggerContext.set(createLogger(`REQ-${requestId}`));
+  
+  yield* doWork();
+}
+
+await main(function*() {
+  // Set default logger
+  yield* LoggerContext.set(createLogger('APP'));
+  
+  const logger: Logger = yield* LoggerContext;
+  logger.log('Application starting');
+  
+  // Handle multiple requests concurrently
+  yield* spawn(() => handleRequest('001'));
+  yield* spawn(() => handleRequest('002'));
+  
+  yield* sleep(200);
+  
+  logger.log('All requests complete');
+});
+```
+
+Output:
+```
+[APP] Application starting
+[REQ-001] Starting work...
+[REQ-002] Starting work...
+[REQ-001] Work complete!
+[REQ-002] Work complete!
+[APP] All requests complete
+```
+
+---
+
+## Practical Example: Database Connection
+
+```typescript
+// database-context.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext, resource, spawn, sleep, ensure } from 'effection';
+
+interface DatabaseConnection {
+  query: (sql: string) => Promise<unknown[]>;
+}
+
+const DatabaseContext: Context<DatabaseConnection> = createContext<DatabaseConnection>('database');
+
+// Database resource that sets context
+function* useDatabase(): Operation<DatabaseConnection> {
+  return yield* resource<DatabaseConnection>(function*(provide) {
+    console.log('Connecting to database...');
+    
+    const connection: DatabaseConnection = {
+      query: async (sql: string) => {
+        console.log('Executing:', sql);
+        return [{ id: 1, name: 'Test' }];
+      },
+    };
+    
+    yield* ensure(() => console.log('Disconnecting from database...'));
+    
+    // Set the context so all children can access it
+    yield* DatabaseContext.set(connection);
+    
+    yield* provide(connection);
+  });
+}
+
+// Repository that uses the context
+function* findUsers(): Operation<unknown[]> {
+  const db: DatabaseConnection = yield* DatabaseContext;
+  return await db.query('SELECT * FROM users');
+}
+
+function* findPosts(): Operation<unknown[]> {
+  const db: DatabaseConnection = yield* DatabaseContext;
+  return await db.query('SELECT * FROM posts');
+}
+
+await main(function*() {
+  yield* useDatabase();
+  
+  // These operations access the database via context
+  const users = yield* findUsers();
+  const posts = yield* findPosts();
+  
+  console.log('Users:', users);
+  console.log('Posts:', posts);
+});
+```
+
+Output:
+```
+Connecting to database...
+Executing: SELECT * FROM users
+Executing: SELECT * FROM posts
+Users: [ { id: 1, name: 'Test' } ]
+Posts: [ { id: 1, name: 'Test' } ]
+Disconnecting from database...
+```
+
+---
+
+## Default Values
+
+You can provide a default value when creating a context:
+
+```typescript
+// context-default.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext } from 'effection';
+
+interface Config {
+  debug: boolean;
+  timeout: number;
+}
+
+const defaultConfig: Config = {
+  debug: false,
+  timeout: 5000,
+};
+
+// Context with default
+const ConfigContext: Context<Config> = createContext<Config>('config', defaultConfig);
+
+function* checkConfig(): Operation<void> {
+  const config: Config = yield* ConfigContext;
+  console.log('Debug mode:', config.debug);
+  console.log('Timeout:', config.timeout);
+}
+
+await main(function*() {
+  // Works without setting - uses default!
+  yield* checkConfig();
+});
+```
+
+Output:
+```
+Debug mode: false
+Timeout: 5000
+```
+
+---
+
+## Context vs Props vs Global State
+
+| Approach | Scope | Best For |
+|----------|-------|----------|
+| Function arguments | Explicit passing | Few levels, clear data flow |
+| Context | Operation tree | Widely-used services, config |
+| Global variables | Entire process | Truly global singletons |
+
+Use context for things that:
+- Many operations need
+- Would be tedious to pass everywhere
+- Should be overridable in subtrees
+
+---
+
+## Mini-Exercise: Request Context
+
+```typescript
+// request-context.ts
+import type { Operation, Context } from 'effection';
+import { main, createContext, spawn, sleep } from 'effection';
+
+interface RequestInfo {
+  id: string;
+  userId: number;
+  startTime: number;
+}
+
+const RequestContext: Context<RequestInfo> = createContext<RequestInfo>('request');
+
+function* logAccess(resource: string): Operation<void> {
+  const req: RequestInfo = yield* RequestContext;
+  const elapsed = Date.now() - req.startTime;
+  console.log(`[${req.id}] User ${req.userId} accessed ${resource} (+${elapsed}ms)`);
+}
+
+function* fetchProfile(): Operation<void> {
+  yield* logAccess('/profile');
+  yield* sleep(50);
+}
+
+function* fetchSettings(): Operation<void> {
+  yield* logAccess('/settings');
+  yield* sleep(30);
+}
+
+function* handleRequest(id: string, userId: number): Operation<void> {
+  yield* RequestContext.set({
+    id,
+    userId,
+    startTime: Date.now(),
+  });
+  
+  yield* fetchProfile();
+  yield* fetchSettings();
+  yield* logAccess('/done');
+}
+
+await main(function*() {
+  yield* spawn(() => handleRequest('req-1', 42));
+  yield* spawn(() => handleRequest('req-2', 17));
+  
+  yield* sleep(200);
+});
+```
+
+Run it: `npx tsx request-context.ts`
+
+---
+
+## Key Takeaways
+
+1. **Context avoids argument drilling** - share values without explicit passing
+2. **Create, Set, Get** - three simple steps
+3. **Context is scoped** - children can override without affecting parents
+4. **Combine with resources** - set context in resource setup
+5. **Use for services and config** - things many operations need
+
+---
+
+## Next Up
+
+We've learned all the core Effection concepts! In Part 4, we'll cover [Scope API](./10-scope-api.md) for integrating Effection with external frameworks like Express.

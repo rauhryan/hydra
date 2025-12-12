@@ -1,0 +1,365 @@
+# Chapter 3.2: Signals - Events from Outside
+
+Channels are great when both producer and consumer are inside Effection. But what about external events?
+
+- DOM events (clicks, key presses)
+- Node.js EventEmitter events
+- Callback-based APIs
+
+The problem: `channel.send()` is an **operation** - you can only call it with `yield*`. But callbacks are plain JavaScript functions!
+
+Enter **Signals**.
+
+---
+
+## The Problem with Channels in Callbacks
+
+This doesn't work:
+
+```typescript
+// broken-callback.ts
+import { main, createChannel, each } from 'effection';
+
+await main(function*() {
+  const channel = createChannel<MouseEvent, void>();
+  
+  // ERROR: can't use yield* in a callback!
+  document.addEventListener('click', (event) => {
+    yield* channel.send(event);  // SyntaxError!
+  });
+});
+```
+
+You can only use `yield*` inside a generator function. Event callbacks are regular functions.
+
+---
+
+## Signals: Callable from Plain JavaScript
+
+A **Signal** is like a Channel, but its `send()` method is a regular function, not an operation:
+
+```typescript
+// signal-basics.ts
+import type { Operation, Signal } from 'effection';
+import { main, createSignal, spawn, sleep, each } from 'effection';
+
+await main(function*() {
+  // Create a signal
+  const clicks: Signal<string, void> = createSignal<string, void>();
+  
+  // clicks.send is a REGULAR FUNCTION - can be used anywhere!
+  setTimeout(() => clicks.send('click 1'), 100);
+  setTimeout(() => clicks.send('click 2'), 200);
+  setTimeout(() => clicks.send('click 3'), 300);
+  setTimeout(() => clicks.close(), 400);
+  
+  // Consume as a stream (same as channel)
+  for (const click of yield* each(clicks)) {
+    console.log('Received:', click);
+    yield* each.next();
+  }
+  
+  console.log('Done');
+});
+```
+
+Output:
+```
+Received: click 1
+Received: click 2
+Received: click 3
+Done
+```
+
+---
+
+## Signal vs Channel
+
+| Feature | Channel | Signal |
+|---------|---------|--------|
+| `send()` returns | `Operation<void>` | `void` |
+| Can call in callbacks | No | Yes |
+| Use inside operations | `yield* channel.send()` | `signal.send()` |
+| Streaming consumption | Same | Same |
+
+---
+
+## Practical Example: DOM Events
+
+In a browser context:
+
+```typescript
+// dom-events.ts (browser)
+import type { Operation, Signal } from 'effection';
+import { main, createSignal, each, ensure } from 'effection';
+
+function* trackClicks(button: HTMLButtonElement): Operation<void> {
+  const clicks: Signal<MouseEvent, void> = createSignal<MouseEvent, void>();
+  
+  // Attach the signal's send function directly as the event handler!
+  button.addEventListener('click', clicks.send);
+  
+  // Clean up when operation ends
+  yield* ensure(() => {
+    button.removeEventListener('click', clicks.send);
+    clicks.close();
+  });
+  
+  // Process clicks
+  for (const event of yield* each(clicks)) {
+    console.log('Clicked at:', event.clientX, event.clientY);
+    yield* each.next();
+  }
+}
+
+// Usage:
+// await main(function*() {
+//   const button = document.querySelector('button')!;
+//   yield* trackClicks(button);
+// });
+```
+
+---
+
+## Practical Example: Node.js EventEmitter
+
+```typescript
+// emitter-events.ts
+import type { Operation, Signal } from 'effection';
+import { main, createSignal, spawn, sleep, each, ensure } from 'effection';
+import { EventEmitter } from 'events';
+
+interface DataEvent {
+  id: number;
+  value: string;
+}
+
+function* streamEvents(emitter: EventEmitter): Operation<void> {
+  const events: Signal<DataEvent, void> = createSignal<DataEvent, void>();
+  const errors: Signal<Error, void> = createSignal<Error, void>();
+  
+  // Attach handlers (regular functions)
+  const onData = (data: DataEvent) => events.send(data);
+  const onError = (err: Error) => errors.send(err);
+  
+  emitter.on('data', onData);
+  emitter.on('error', onError);
+  
+  yield* ensure(() => {
+    emitter.off('data', onData);
+    emitter.off('error', onError);
+    events.close();
+    errors.close();
+  });
+  
+  // Process events
+  for (const event of yield* each(events)) {
+    console.log('Data event:', event);
+    yield* each.next();
+  }
+}
+
+// Demo
+await main(function*() {
+  const emitter = new EventEmitter();
+  
+  // Start consuming events
+  yield* spawn(() => streamEvents(emitter));
+  
+  yield* sleep(10);
+  
+  // Emit some events
+  emitter.emit('data', { id: 1, value: 'first' });
+  emitter.emit('data', { id: 2, value: 'second' });
+  emitter.emit('data', { id: 3, value: 'third' });
+  
+  yield* sleep(100);
+});
+```
+
+---
+
+## Creating Reusable Stream Factories
+
+Combine signals with resources to create reusable stream factories:
+
+```typescript
+// click-stream.ts
+import type { Operation, Stream, Subscription, Signal } from 'effection';
+import { main, resource, createSignal, spawn, sleep, each, ensure } from 'effection';
+import { EventEmitter } from 'events';
+
+// A stream factory for any EventEmitter event
+function eventsFrom<T>(
+  emitter: EventEmitter,
+  eventName: string
+): Stream<T, void> {
+  return resource<Subscription<T, void>>(function*(provide) {
+    const signal: Signal<T, void> = createSignal<T, void>();
+    
+    const handler = (value: T) => signal.send(value);
+    emitter.on(eventName, handler);
+    
+    try {
+      // Provide the subscription (the stream interface)
+      const subscription: Subscription<T, void> = yield* signal;
+      yield* provide(subscription);
+    } finally {
+      emitter.off(eventName, handler);
+      signal.close();
+    }
+  });
+}
+
+// Usage
+await main(function*() {
+  const emitter = new EventEmitter();
+  
+  // Create multiple independent subscriptions to the same events
+  yield* spawn(function*(): Operation<void> {
+    for (const data of yield* each(eventsFrom<string>(emitter, 'message'))) {
+      console.log('Subscriber A:', data);
+      yield* each.next();
+    }
+  });
+  
+  yield* spawn(function*(): Operation<void> {
+    for (const data of yield* each(eventsFrom<string>(emitter, 'message'))) {
+      console.log('Subscriber B:', data);
+      yield* each.next();
+    }
+  });
+  
+  yield* sleep(10);
+  
+  emitter.emit('message', 'Hello');
+  emitter.emit('message', 'World');
+  
+  yield* sleep(100);
+});
+```
+
+---
+
+## The Built-in `on()` Function
+
+Effection provides a built-in helper for EventTarget (DOM) events:
+
+```typescript
+// on-helper.ts (browser)
+import { main, each, on } from 'effection';
+
+await main(function*() {
+  const button = document.querySelector('button')!;
+  
+  // on() creates a stream from any EventTarget
+  for (const event of yield* each(on(button, 'click'))) {
+    console.log('Clicked!', event);
+    yield* each.next();
+  }
+});
+```
+
+For Node.js EventEmitter, you'll typically create your own helper as shown above.
+
+---
+
+## Signal Closing
+
+Like channels, signals can be closed (optionally with a final value):
+
+```typescript
+// signal-closing.ts
+import type { Signal } from 'effection';
+import { main, createSignal, spawn, sleep, each } from 'effection';
+
+await main(function*() {
+  const signal: Signal<number, string> = createSignal<number, string>();
+  
+  // Producer
+  setTimeout(() => signal.send(1), 100);
+  setTimeout(() => signal.send(2), 200);
+  setTimeout(() => signal.close('done!'), 300);  // Close with final value
+  
+  // Consumer
+  const subscription = yield* signal;
+  
+  let result = yield* subscription.next();
+  while (!result.done) {
+    console.log('Value:', result.value);
+    result = yield* subscription.next();
+  }
+  
+  console.log('Final:', result.value); // 'done!'
+});
+```
+
+---
+
+## When to Use Signals vs Channels
+
+| Scenario | Use |
+|----------|-----|
+| Both producer and consumer in Effection | `Channel` |
+| Producer is a callback/external code | `Signal` |
+| DOM/browser events | `Signal` or `on()` |
+| Node.js EventEmitter | `Signal` |
+| Communication between operations | `Channel` |
+
+---
+
+## Mini-Exercise: Keyboard Input Stream
+
+```typescript
+// keyboard-stream.ts
+import type { Operation, Signal } from 'effection';
+import { main, createSignal, spawn, sleep, each, ensure } from 'effection';
+import * as readline from 'readline';
+
+function* keyboardInput(): Operation<void> {
+  const lines: Signal<string, void> = createSignal<string, void>();
+  
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  
+  rl.on('line', lines.send);
+  
+  yield* ensure(() => {
+    rl.close();
+    lines.close();
+  });
+  
+  console.log('Type messages (Ctrl+C to exit):\n');
+  
+  for (const line of yield* each(lines)) {
+    console.log(`You typed: "${line}"`);
+    yield* each.next();
+  }
+}
+
+await main(function*() {
+  yield* keyboardInput();
+});
+```
+
+Run it: `npx tsx keyboard-stream.ts`
+
+Type lines and see them echoed back. Press Ctrl+C to exit cleanly.
+
+---
+
+## Key Takeaways
+
+1. **Signals bridge callbacks to Effection** - `send()` is a regular function
+2. **Use signals for external events** - DOM, EventEmitter, callbacks
+3. **Channels for internal communication** - between Effection operations
+4. **Combine with resources** - for clean setup/teardown of event listeners
+5. **Signals and channels stream the same way** - use `for yield* each` for both
+
+---
+
+## Next Up
+
+We've covered communication between operations. But how do we share values across the operation tree without passing them everywhere? That's where [Context](./09-context.md) comes in.

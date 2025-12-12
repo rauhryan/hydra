@@ -1,0 +1,29 @@
+{
+    "name": "hydra",
+    "type": "module",
+    "version": "1.0.0",
+    "description": "",
+    "scripts": {
+        "server": "tsx express-server.ts"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "packageManager": "pnpm@10.24.0",
+    "dependencies": {
+    "morgan": "catalog:",
+        "express": "catalog:"
+    },
+    "devDependencies": {
+        "effection": "catalog:",
+        "@effectionx/process": "^0.6.1",
+    "@types/morgan": "catalog:",
+        "@types/express": "catalog:",
+        "@types/node": "catalog:",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
+        "@types/http-proxy": "^1.17.17",
+        "http-proxy": "^1.18.1",
+        "@effectionx/tinyexec": "^0.3.1"
+    }
+}
