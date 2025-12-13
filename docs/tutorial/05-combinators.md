@@ -300,7 +300,83 @@ await main(function*() {
 });
 ```
 
-Wait - this doesn't quite work! If service-a fails first, the whole race fails. What we really want is "first to **succeed**". We'd need a custom combinator for that (which we'll build later with streams).
+Wait - this doesn't quite work! If service-a fails first, the whole race fails. What we really want is "first to **succeed**".
+
+### Building a `firstSuccess` Combinator
+
+We can build this ourselves! Here's a straightforward approach using spawn and polling:
+
+```typescript
+// first-success-simple.ts (excerpt)
+function* firstSuccess<T>(operations: (() => Operation<T>)[]): Operation<T> {
+  let result: T | undefined;
+  let succeeded = false;
+  let failureCount = 0;
+  const total = operations.length;
+
+  yield* scoped(function* () {
+    for (const op of operations) {
+      yield* spawn(function* () {
+        try {
+          const value = yield* op();
+          if (!succeeded) {
+            succeeded = true;
+            result = value;
+          }
+        } catch {
+          failureCount++;
+        }
+      });
+    }
+
+    // Poll until we get a success or all fail
+    while (!succeeded && failureCount < total) {
+      yield* sleep(10); // Checking a variable in a loop... gross.
+    }
+  });
+
+  return result!;
+}
+```
+
+Run it: `npx tsx first-success-simple.ts`
+
+This works, but look at that polling loop! We're burning CPU cycles checking a variable every 10ms. There has to be a better way to coordinate between concurrent tasks...
+
+And there is! Using **Signals** (which we'll cover in [Chapter 08](./08-signals.md)):
+
+```typescript
+// first-success-signals.ts (excerpt)
+function* firstSuccess<T>(operations: (() => Operation<T>)[]): Operation<T> {
+  const success: Signal<T, never> = createSignal<T, never>();
+
+  return yield* scoped(function* () {
+    for (const op of operations) {
+      yield* spawn(function* () {
+        try {
+          const value = yield* op();
+          success.send(value); // No yield* needed - it's synchronous!
+        } catch {
+          // Ignore failures
+        }
+      });
+    }
+
+    // Wait for the first success - blocks until send() is called
+    for (const result of yield* each(success)) {
+      return result; // Got one! Scope halts other tasks automatically
+    }
+
+    throw new Error('All operations failed');
+  });
+}
+```
+
+Run it: `npx tsx first-success-signals.ts`
+
+No polling! The Signal lets tasks communicate directly. When any task succeeds, it sends the result, and we immediately receive it. Clean, event-driven coordination.
+
+> **Preview**: Signals are one of Effection's most powerful features for bridging the imperative world (callbacks, event handlers) with structured concurrency. We'll dive deep in [Chapter 08: Signals](./08-signals.md).
 
 ---
 
