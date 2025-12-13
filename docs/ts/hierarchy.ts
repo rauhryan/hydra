@@ -43,19 +43,31 @@ await main(function*() {
     console.log('[1] Before spawn');
 
     yield* spawn(function*() {
-      console.log('[3] Child started'); // When does this print?
+      yield* ensure(() => console.log('[child] Exiting (halted!)'));
+      console.log('[3] Child started');
       yield* sleep(50);
+      console.log('[child] Finished'); // Never prints!
     });
 
     console.log('[2] After spawn, before yield');
     yield* sleep(0); // Yield control - NOW child runs
     console.log('[4] After yield');
 
-    yield* sleep(100);
+    yield* sleep(0);
+    console.log('[5] Parent exiting');
   });
 
   yield* sleep(200);
-  console.log('Result: Child started at [3], AFTER parent yielded!\n');
+  console.log(`
+Timeline:
+  [1] → [2] → yield → [3] → child sleeps...
+                        ↓
+               [4] → [5] → parent exits
+                        ↓
+               child halted! (never prints "Finished")
+
+Result: Child started AFTER parent yielded, but was halted when parent exited!
+`);
 
   // ═══════════════════════════════════════════════════════════════════
   // Scenario 3: Cleanup happens deepest-first

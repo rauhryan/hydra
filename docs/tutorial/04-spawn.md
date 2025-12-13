@@ -23,10 +23,10 @@ function* fetchFromAPI(source: string): Operation<string> {
 
 await main(function*() {
   console.time('total');
-  
+
   const dataA: string = yield* fetchFromAPI('api-a');
   const dataB: string = yield* fetchFromAPI('api-b');
-  
+
   console.log(dataA, dataB);
   console.timeEnd('total'); // ~1000ms - sequential!
 });
@@ -143,13 +143,13 @@ function* fetchFromAPI(source: string): Operation<string> {
 
 await main(function*() {
   console.time('total');
-  
+
   const taskA: Task<string> = yield* spawn(() => fetchFromAPI('api-a'));
   const taskB: Task<string> = yield* spawn(() => fetchFromAPI('api-b'));
-  
+
   const dataA: string = yield* taskA;
   const dataB: string = yield* taskB;
-  
+
   console.log(dataA, dataB);
   console.timeEnd('total'); // ~500ms - parallel!
 });
@@ -188,7 +188,7 @@ await main(function*() {
       yield* sleep(100);
     }
   });
-  
+
   yield* sleep(550);
   console.log('main ending...');
   // main ends, the infinite loop is halted!
@@ -286,7 +286,7 @@ await main(function*() {
     yield* sleep(1000);
     return 'completed!';
   });
-  
+
   // Wait for it to finish
   const result: string = yield* task;
   console.log(result); // 'completed!'
@@ -318,10 +318,10 @@ await main(function*() {
       yield* sleep(1000);
     }
   });
-  
+
   // Do other work...
   yield* doMainWork();
-  
+
   // When main ends, heartbeat is automatically stopped
 });
 ```
@@ -381,17 +381,17 @@ function* fetchComments(postId: number): Operation<Comment[]> {
 
 await main(function*() {
   console.time('total');
-  
+
   // Fetch user first
   const user: User = yield* fetchUser(1);
-  
+
   // Then fetch posts and comments in parallel
   const postsTask: Task<Post[]> = yield* spawn(() => fetchPosts(user.id));
   const commentsTask: Task<Comment[]> = yield* spawn(() => fetchComments(1));
-  
+
   const posts: Post[] = yield* postsTask;
   const comments: Comment[] = yield* commentsTask;
-  
+
   console.log({ user, posts, comments });
   console.timeEnd('total'); // ~800ms, not 1000ms!
 });
@@ -449,19 +449,31 @@ await main(function*() {
     console.log('[1] Before spawn');
 
     yield* spawn(function*() {
-      console.log('[3] Child started'); // When does this print?
+      yield* ensure(() => console.log('[child] Exiting (halted!)'));
+      console.log('[3] Child started');
       yield* sleep(50);
+      console.log('[child] Finished'); // Never prints!
     });
 
     console.log('[2] After spawn, before yield');
     yield* sleep(0); // Yield control - NOW child runs
     console.log('[4] After yield');
 
-    yield* sleep(100);
+    yield* sleep(0);
+    console.log('[5] Parent exiting');
   });
 
   yield* sleep(200);
-  console.log('Result: Child started at [3], AFTER parent yielded!\n');
+  console.log(`
+Timeline:
+  [1] → [2] → yield → [3] → child sleeps...
+                        ↓
+               [4] → [5] → parent exits
+                        ↓
+               child halted! (never prints "Finished")
+
+Result: Child started AFTER parent yielded, but was halted when parent exited!
+`);
 
   // ═══════════════════════════════════════════════════════════════════
   // Scenario 3: Cleanup happens deepest-first
@@ -526,7 +538,17 @@ Result: Grandchild never ran because parent returned immediately!
 [2] After spawn, before yield
 [3] Child started
 [4] After yield
-Result: Child started at [3], AFTER parent yielded!
+[5] Parent exiting
+[child] Exiting (halted!)
+
+Timeline:
+  [1] → [2] → yield → [3] → child sleeps...
+                        ↓
+               [4] → [5] → parent exits
+                        ↓
+               child halted! (never prints "Finished")
+
+Result: Child started AFTER parent yielded, but was halted when parent exited!
 
 ═══ Scenario 3: Cleanup order (deepest first) ═══
 
@@ -576,16 +598,16 @@ function* countdown(name: string, seconds: number): Operation<string> {
 
 await main(function*() {
   console.log('Starting parallel countdowns...\n');
-  
+
   const task1: Task<string> = yield* spawn(() => countdown('Alpha', 3));
   const task2: Task<string> = yield* spawn(() => countdown('Beta', 5));
   const task3: Task<string> = yield* spawn(() => countdown('Gamma', 2));
-  
+
   // Wait for all to complete
   const result1: string = yield* task1;
   const result2: string = yield* task2;
   const result3: string = yield* task3;
-  
+
   console.log('\nAll done!');
   console.log(result1, result2, result3);
 });
