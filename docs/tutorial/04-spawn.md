@@ -209,38 +209,63 @@ After ~550ms, main ends and the spawned task is automatically stopped.
 
 ### 2. Child errors propagate to the parent
 
+When a spawned child fails, it crashes the parent scope. But here's the key: **all sibling tasks are halted and cleaned up BEFORE the error propagates**. This is structured concurrency in action.
+
 ```typescript
-// error-propagation.ts
+// error-propagation.ts - Demonstrates structured error handling
+//
+// Key insight: When a spawned child fails, it crashes the parent scope.
+// All sibling tasks are halted and cleaned up BEFORE the error propagates.
+// You can catch the error at the main() boundary using .catch()
+
 import type { Operation } from 'effection';
-import { main, spawn, sleep } from 'effection';
+import { main, spawn, sleep, ensure } from 'effection';
+
+function* worker(id: number, shouldFail: boolean): Operation<void> {
+  console.log(`[worker-${id}] Starting`);
+  yield* ensure(() => console.log(`[worker-${id}] Cleanup`));
+
+  yield* sleep(shouldFail ? 100 : 500);
+
+  if (shouldFail) {
+    throw new Error(`Worker ${id} failed!`);
+  }
+
+  console.log(`[worker-${id}] Completed`);
+}
 
 await main(function*() {
-  yield* spawn(function*(): Operation<void> {
-    yield* sleep(100);
-    throw new Error('Child failed!');
-  });
-  
-  yield* spawn(function*(): Operation<void> {
-    yield* sleep(1000);  // This will be halted!
-    console.log('Never reached');
-  });
-  
-  yield* sleep(2000);
-  console.log('Also never reached');
+  yield* spawn(() => worker(1, true));   // Will fail after 100ms
+  yield* spawn(() => worker(2, false));  // Will be halted before completing
+  yield* spawn(() => worker(3, false));  // Will be halted before completing
+
+  yield* sleep(1000);
+  console.log('Never reached');
+}).catch(error => {
+  console.log(`\nCaught error: ${(error as Error).message}`);
+  console.log('All workers were cleaned up before we got here!');
 });
 ```
 
-The hierarchy after failure:
-
+Output:
 ```
-+-- main [FAILED]
-    |
-    +-- child 1 [FAILED] (threw error)
-    |
-    +-- child 2 [HALTED] (killed by parent)
+[worker-1] Starting
+[worker-2] Starting
+[worker-3] Starting
+[worker-1] Cleanup
+[worker-3] Cleanup
+[worker-2] Cleanup
+
+Caught error: Worker 1 failed!
+All workers were cleaned up before we got here!
 ```
 
-When child 1 fails, it causes main to fail. Main then halts all remaining children before propagating the error.
+Notice:
+- All three workers start
+- When worker-1 fails, **all workers get cleaned up** (including the failing one)
+- No "Completed" logs - workers 2 and 3 were halted before they could finish
+- The error is caught via `.catch()` on the `main()` Promise
+- Cleanup happens **before** the error handler runs
 
 ---
 
