@@ -13,6 +13,7 @@
 import { main, suspend, spawn, each } from 'effection';
 import { useServerPool } from './src/server-pool.ts';
 import { useSwitchboard } from './src/switchboard.ts';
+import type { ServerEvent } from './src/types.ts';
 
 const SWITCHBOARD_PORT = 8000;
 const BASE_SERVER_PORT = 3001;
@@ -37,15 +38,16 @@ await main(function*() {
   // Subscribe to pool events for observability (lspx pattern)
   yield* spawn(function*() {
     for (const event of yield* each(pool.events)) {
-      switch (event.type) {
+      const e = event as ServerEvent;
+      switch (e.type) {
         case 'started':
-          console.log(`[Events] Server started: ${event.hostname} on port ${event.port}`);
+          console.log(`[Events] Server started: ${e.hostname} on port ${e.port}`);
           break;
         case 'stopped':
-          console.log(`[Events] Server stopped: ${event.hostname}`);
+          console.log(`[Events] Server stopped: ${e.hostname}`);
           break;
         case 'error':
-          console.error(`[Events] Server error: ${event.hostname} - ${event.message}`);
+          console.error(`[Events] Server error: ${e.hostname} - ${e.message}`);
           break;
       }
       yield* each.next();

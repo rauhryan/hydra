@@ -191,10 +191,10 @@ function useServerPool(config) {
 }
 function extractHostname(req, defaultHostname) {
   const host = req.get("host") || "";
-  const hostWithoutPort = host.split(":")[0];
+  const hostWithoutPort = host.split(":")[0] ?? "";
   if (hostWithoutPort.includes(".")) {
     const parts = hostWithoutPort.split(".");
-    return parts[0];
+    return parts[0] ?? defaultHostname;
   }
   const appHeader = req.get("x-app-name");
   if (appHeader) {

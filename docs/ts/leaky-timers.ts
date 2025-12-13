@@ -11,7 +11,7 @@ async function createLeakyTimer(id: number, ms: number): Promise<void> {
   });
 }
 
-async function main(): Promise<void> {
+(async function main(): Promise<void> {
   console.log('Starting race...');
   console.time('total');
   
@@ -27,6 +27,4 @@ async function main(): Promise<void> {
   
   // We'd need to manually clean up:
   // timers.forEach(id => clearTimeout(id));
-}
-
-main();
+})();

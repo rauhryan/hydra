@@ -24,13 +24,13 @@ export interface SwitchboardHandle {
  */
 function extractHostname(req: Request, defaultHostname: string): string {
   const host = req.get('host') || '';
-  const hostWithoutPort = host.split(':')[0];
+  const hostWithoutPort = host.split(':')[0] ?? '';
   
   // Handle patterns like "app-a.localhost" -> "app-a"
   if (hostWithoutPort.includes('.')) {
     const parts = hostWithoutPort.split('.');
     // Take the first part as the app name
-    return parts[0];
+    return parts[0] ?? defaultHostname;
   }
   
   // Check for X-App-Name header as alternative
@@ -92,7 +92,7 @@ export function useSwitchboard(
     app.get('/__switchboard/health', (_req: Request, res: Response) => {
       res.json({
         status: 'ok',
-        servers: pool.list().map(s => ({
+        servers: pool.list().map((s: ServerInfo) => ({
           hostname: s.hostname,
           port: s.port,
           uptime: Date.now() - s.startedAt.getTime(),
@@ -103,7 +103,7 @@ export function useSwitchboard(
     // List all running servers
     app.get('/__switchboard/servers', (_req: Request, res: Response) => {
       res.json({
-        servers: pool.list().map(s => ({
+        servers: pool.list().map((s: ServerInfo) => ({
           hostname: s.hostname,
           port: s.port,
           startedAt: s.startedAt.toISOString(),

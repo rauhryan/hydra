@@ -1,6 +1,6 @@
-import express, { type Request, type Response } from 'express'
+import express, { type Express, type Request, type Response } from 'express'
 
-const app = express();
+const app: Express = express();
 
 // Disable x-powered-by header
 app.disable('x-powered-by');

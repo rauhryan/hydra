@@ -1,5 +1,5 @@
 {
-  "name": "@tanstack/hydra",
+  "name": "hydra-effection",
   "version": "0.0.1",
   "description": "Multiplex HTTP proxy using Effection - dynamically spawns Express servers per hostname",
   "type": "module",
@@ -40,25 +40,25 @@
   "author": "",
   "license": "MIT",
   "peerDependencies": {
-    "effection": ">=4.0.0",
+    "effection": ">=4.0.0-beta.0",
     "express": ">=4.0.0",
     "http-proxy": ">=1.0.0"
   },
   "dependencies": {
-    "morgan": "catalog:",
-    "express": "catalog:",
-    "http-proxy": "^1.18.1"
+    "express": "^5.0.0",
+    "http-proxy": "^1.18.1",
+    "morgan": "^1.10.0"
   },
   "devDependencies": {
-    "effection": "catalog:",
     "@effectionx/process": "^0.6.1",
-    "@types/morgan": "catalog:",
-    "@types/express": "catalog:",
-    "@types/node": "catalog:",
+    "@effectionx/tinyexec": "^0.3.1",
+    "@types/express": "^5.0.0",
     "@types/http-proxy": "^1.17.17",
-    "tsx": "catalog:",
-    "tsup": "catalog:",
-    "typescript": "catalog:",
-    "@effectionx/tinyexec": "^0.3.1"
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^22.0.0",
+    "effection": "^4.0.0-beta.3",
+    "tsup": "^8.3.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
   }
 }
