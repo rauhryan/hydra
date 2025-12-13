@@ -38,33 +38,93 @@ This works, but it's slow - we fetch one, wait, then fetch the other. What if ea
 
 ## The Wrong Way: Using `run()`
 
-You might try this:
+You might try using `run()` to start concurrent tasks, but this breaks structured concurrency:
 
 ```typescript
-// wrong-way.ts
+// wrong-way.ts - Why run() inside operations breaks structured concurrency
 import type { Operation } from 'effection';
-import { main, run, sleep } from 'effection';
+import { main, run, spawn, sleep, ensure, scoped } from 'effection';
 
-function* fetchFromAPI(source: string): Operation<string> {
+function* task(name: string): Operation<string> {
+  console.log(`[${name}] Started`);
+  yield* ensure(() => console.log(`[${name}] Cleanup`));
   yield* sleep(500);
-  return `Data from ${source}`;
+  console.log(`[${name}] Done`);
+  return name;
 }
 
 await main(function*() {
-  // DON'T DO THIS!
-  const taskA = run(fetchFromAPI('api-a'));
-  const taskB = run(fetchFromAPI('api-b'));
-  
-  const dataA: string = yield* taskA;
-  const dataB: string = yield* taskB;
-  
-  console.log(dataA, dataB);
+  // === CORRECT: spawn() creates children that get cleaned up ===
+  console.log('=== spawn(): Structured Concurrency ===\n');
+
+  yield* scoped(function*() {
+    yield* spawn(() => task('child-a'));
+    yield* spawn(() => task('child-b'));
+
+    yield* sleep(100);
+    console.log('Scope exiting early...\n');
+    // When this scope exits, spawned children are halted immediately
+  });
+
+  console.log('Result: Children were halted and cleaned up (no "Done" logged)!\n');
+  console.log('='.repeat(50) + '\n');
+
+  // === WRONG: run() creates independent tasks that escape the scope ===
+  console.log('=== run(): Breaking Structured Concurrency ===\n');
+
+  yield* scoped(function*() {
+    // DON'T DO THIS - these tasks escape to the global scope!
+    run(() => task('orphan-a'));
+    run(() => task('orphan-b'));
+
+    yield* sleep(100);
+    console.log('Scope exiting early...\n');
+    // Orphaned tasks keep running - they are NOT children of this scope
+  });
+
+  console.log('Result: Orphans were NOT halted - still running!\n');
+
+  // Wait to show orphaned tasks complete on their own
+  yield* sleep(600);
+  console.log('\n--- Orphans finished on their own (not structured) ---');
 });
 ```
 
-This runs them concurrently, but there's a fatal flaw: **these tasks are not children of main**.
+Output:
+```
+=== spawn(): Structured Concurrency ===
 
-If `fetchFromAPI('api-b')` fails, what happens to `fetchFromAPI('api-a')`? Nothing! It keeps running - a dangling operation.
+[child-a] Started
+[child-b] Started
+Scope exiting early...
+
+[child-b] Cleanup
+[child-a] Cleanup
+Result: Children were halted and cleaned up (no "Done" logged)!
+
+==================================================
+
+=== run(): Breaking Structured Concurrency ===
+
+[orphan-a] Started
+[orphan-b] Started
+Scope exiting early...
+
+Result: Orphans were NOT halted - still running!
+
+[orphan-a] Done
+[orphan-a] Cleanup
+[orphan-b] Done
+[orphan-b] Cleanup
+
+--- Orphans finished on their own (not structured) ---
+```
+
+Notice the difference:
+- **spawn()**: When the scope exits, children are **halted immediately** - "Cleanup" runs but "Done" never logs
+- **run()**: Tasks **escape** the scope and keep running - both "Done" and "Cleanup" log later
+
+This is the core problem: `run()` creates tasks in the global scope, not as children of the current operation.
 
 ---
 
