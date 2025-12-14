@@ -13,10 +13,15 @@ These are **resources** - long-running services that you need to interact with d
 
 ## The Problem: Operations That Block
 
-Let's try to create a "use socket" operation:
+We want to create a `useSocket()` function that:
+1. Creates and connects a socket
+2. Returns the socket to the caller for use
+3. Cleans up the socket when the scope ends
+
+Let's try building this with what we know so far:
 
 ```typescript
-// blocking-socket.ts
+// blocking-socket.ts (THIS DOESN'T WORK!)
 import type { Operation } from 'effection';
 import { main, action, suspend } from 'effection';
 import { EventEmitter } from 'events';
@@ -39,21 +44,48 @@ function* useSocket(): Operation<FakeSocket> {
   });
   
   try {
-    // We want to return the socket... but also clean up later
-    yield* suspend();  // This blocks forever!
-    return socket;     // We never get here
+    yield* suspend();  // Stay alive for cleanup...
+    return socket;     
   } finally {
     socket.close();
   }
 }
 
 await main(function*() {
-  const socket = yield* useSocket();  // Blocks forever!
-  socket.send('hello');               // Never reached
+  const socket = yield* useSocket();
+  socket.send('hello');
 });
 ```
 
-The problem: if we `suspend()` to keep the operation alive for cleanup, we never return the socket to the caller. If we return immediately, we have no way to trigger cleanup.
+**This code hangs forever!** Let's trace through it:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ main()                                                           │
+│                                                                  │
+│   const socket = yield* useSocket();  <─── Waiting here...      │
+│                          │                                       │
+│                          v                                       │
+│               ┌─────────────────────┐                            │
+│               │ useSocket()         │                            │
+│               │                     │                            │
+│               │  1. connect()   ✓   │                            │
+│               │  2. wait for it ✓   │                            │
+│               │  3. suspend()   ⏸   │ <─── Stuck forever         │
+│               │  4. return      ✗   │ <─── Never reached         │
+│               └─────────────────────┘                            │
+│                                                                  │
+│   socket.send('hello');  <─── Never happens                      │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+The problem: `suspend()` keeps the operation alive (good for cleanup!) but blocks the return (bad for the caller!).
+
+We can't win:
+- **Return immediately?** The operation ends, `finally` runs, socket closes before we use it
+- **Suspend to stay alive?** We never return the socket to the caller
+
+We need a way to say: *"Here's the value — now keep me alive until you're done with it."*
 
 ---
 
@@ -120,12 +152,42 @@ Socket closed
 
 ## How `provide()` Works
 
-The `provide()` function does two things:
+To understand why `provide()` is special, let's look at how `yield*` normally behaves.
 
-1. **Returns the value to the caller** - `yield* useSocket()` receives the socket
-2. **Suspends the resource** - keeps it alive until the parent scope ends
+When you write `yield*`, control flows INTO the operation and doesn't come back until it completes:
 
-When the parent scope ends (or is halted), the resource continues from `provide()`, hitting the `finally` block for cleanup.
+```
+yield* useSocket()           useSocket()
+   │                            │
+   │ ─── control goes in ────>  │
+   │                            │  work...
+   │     (waiting...)           │  work...
+   │                            │  suspend() ⏸
+   │     (waiting forever)      │
+   v                            v
+```
+
+That's why our first attempt hung — `suspend()` never completes, so control never returns.
+
+`provide()` breaks this rule. It yields a value back *while keeping the operation alive*:
+
+```
+yield* useSocket()           useSocket()
+   │                            │
+   │ ─── control goes in ────>  │
+   │                            │  connect...
+   │                            │  wait...
+   │ <─── provide(socket) ────  │  still alive! ⏸
+   │                            │
+   │  socket.send('hello')      │  (suspended, waiting
+   │  socket.send('world')      │   for scope to end)
+   │                            │
+   │ ─── scope ends ──────────> │
+   │                            │  finally { cleanup }
+   v                            v
+```
+
+This is the key insight: **`provide()` returns a value to the caller while the resource keeps running in the background.** When the parent scope ends, the resource resumes from `provide()` and hits the `finally` block for cleanup.
 
 ---
 
