@@ -423,4 +423,4 @@ Type lines and see them echoed back. Press Ctrl+C to exit cleanly.
 
 ## Next Up
 
-We've covered communication between operations. But how do we share values across the operation tree without passing them everywhere? That's where [Context](./09-context.md) comes in.
+Now that we've seen both Channels and Signals, you might have noticed they work the same way when consuming them. That's because they're both **Streams**. In the next chapter, we'll explore [Streams](./09-streams.md) - the unifying concept behind all sequence producers in Effection.

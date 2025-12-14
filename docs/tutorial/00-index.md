@@ -31,17 +31,14 @@ By the end of this tutorial, you'll build a **multiplex HTTP proxy** that dynami
 ### Part 3: Communication - "Operations Talking to Each Other"
 - [3.1 Channels](./07-channels.md) - Communication between operations
 - [3.2 Signals](./08-signals.md) - Events from callbacks
-- [3.3 Context](./09-context.md) - Sharing values down the tree
+- [3.3 Streams](./09-streams.md) - The unifying concept
+- [3.4 Context](./10-context.md) - Sharing values down the tree
 
 ### Part 4: Integration
-- [4.1 Scope API](./10-scope-api.md) - Embedding Effection in Express, React, etc.
+- [4.1 Scope API](./11-scope-api.md) - Embedding Effection in Express, React, etc.
 
-### Part 5: Capstone - Multiplex HTTP Proxy (Coming Soon)
-Build a production-ready proxy that:
-- Dynamically spawns Express servers on demand
-- Routes requests via hostname/path matching
-- Manages server lifecycle with proper cleanup
-- Demonstrates all Effection concepts together
+### Part 5: Capstone - Multiplex HTTP Proxy
+- [5.1 Architecture Overview](./12-capstone-architecture.md) - What we're building
 
 ---
 

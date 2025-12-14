@@ -1,4 +1,4 @@
-# Chapter 3.3: Context - Passing Values Down the Tree
+# Chapter 3.4: Context - Passing Values Down the Tree
 
 Sometimes you need to share values across many operations without passing them as arguments everywhere. This is called "argument drilling" and it's painful:
 
@@ -184,58 +184,66 @@ Output:
 
 ## Practical Example: Database Connection
 
+Context works great with resources. The key is that operations running *inside* the resource scope can see the context:
+
 ```typescript
 // database-context.ts
 import type { Operation, Context } from 'effection';
-import { main, createContext, resource, spawn, sleep, ensure } from 'effection';
+import { main, createContext, resource, ensure } from 'effection';
 
 interface DatabaseConnection {
-  query: (sql: string) => Promise<unknown[]>;
+  query: (sql: string) => string;
 }
 
 const DatabaseContext: Context<DatabaseConnection> = createContext<DatabaseConnection>('database');
 
-// Database resource that sets context
-function* useDatabase(): Operation<DatabaseConnection> {
-  return yield* resource<DatabaseConnection>(function*(provide) {
+// Repository that uses the context
+function* findUsers(): Operation<string> {
+  const db: DatabaseConnection = yield* DatabaseContext.expect();
+  return db.query('SELECT * FROM users');
+}
+
+function* findPosts(): Operation<string> {
+  const db: DatabaseConnection = yield* DatabaseContext.expect();
+  return db.query('SELECT * FROM posts');
+}
+
+// A resource that establishes a database connection and sets context.
+// The callback runs INSIDE the resource scope, so it can access context.
+function* withDatabase<T>(work: () => Operation<T>): Operation<T> {
+  return yield* resource<T>(function*(provide) {
     console.log('Connecting to database...');
     
     const connection: DatabaseConnection = {
-      query: async (sql: string) => {
+      query: (sql: string) => {
         console.log('Executing:', sql);
-        return [{ id: 1, name: 'Test' }];
+        return JSON.stringify([{ id: 1, name: 'Test' }]);
       },
     };
     
     yield* ensure(() => console.log('Disconnecting from database...'));
     
-    // Set the context so all children can access it
+    // Set context - visible to work() and anything it spawns
     yield* DatabaseContext.set(connection);
     
-    yield* provide(connection);
+    // Run the work and provide its result
+    const result: T = yield* work();
+    yield* provide(result);
   });
 }
 
-// Repository that uses the context
-function* findUsers(): Operation<unknown[]> {
-  const db: DatabaseConnection = yield* DatabaseContext.expect();
-  return await db.query('SELECT * FROM users');
-}
-
-function* findPosts(): Operation<unknown[]> {
-  const db: DatabaseConnection = yield* DatabaseContext.expect();
-  return await db.query('SELECT * FROM posts');
-}
-
 await main(function*() {
-  yield* useDatabase();
+  // Use withDatabase to run operations that need database access
+  const result = yield* withDatabase(function*() {
+    // These operations run INSIDE the resource scope, so they see the context
+    const users = yield* findUsers();
+    const posts = yield* findPosts();
+    
+    return { users, posts };
+  });
   
-  // These operations access the database via context
-  const users = yield* findUsers();
-  const posts = yield* findPosts();
-  
-  console.log('Users:', users);
-  console.log('Posts:', posts);
+  console.log('Users:', result.users);
+  console.log('Posts:', result.posts);
 });
 ```
 
@@ -244,8 +252,8 @@ Output:
 Connecting to database...
 Executing: SELECT * FROM users
 Executing: SELECT * FROM posts
-Users: [ { id: 1, name: 'Test' } ]
-Posts: [ { id: 1, name: 'Test' } ]
+Users: [{"id":1,"name":"Test"}]
+Posts: [{"id":1,"name":"Test"}]
 Disconnecting from database...
 ```
 
@@ -375,4 +383,4 @@ Run it: `npx tsx request-context.ts`
 
 ## Next Up
 
-We've learned all the core Effection concepts! In Part 4, we'll cover [Scope API](./10-scope-api.md) for integrating Effection with external frameworks like Express.
+We've learned all the core Effection concepts! In Part 4, we'll cover [Scope API](./11-scope-api.md) for integrating Effection with external frameworks like Express.

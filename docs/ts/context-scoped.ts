@@ -14,19 +14,25 @@ await main(function*() {
   
   yield* logTheme('main');  // "light"
   
-  yield* spawn(function*(): Operation<void> {
+  // Spawn child and WAIT for it to complete
+  const childTask = yield* spawn(function*(): Operation<void> {
     // Child can override
     yield* ThemeContext.set('dark');
     yield* logTheme('child');  // "dark"
     
-    yield* spawn(function*(): Operation<void> {
+    // Spawn grandchild and wait for it
+    const grandchildTask = yield* spawn(function*(): Operation<void> {
       // Grandchild inherits from child
       yield* logTheme('grandchild');  // "dark"
     });
+    
+    // Wait for grandchild to complete before child exits
+    yield* grandchildTask;
   });
+  
+  // Wait for child (and grandchild) to complete
+  yield* childTask;
   
   // Parent is unaffected by child's override
   yield* logTheme('main again');  // "light"
-  
-  yield* sleep(100);
 });
