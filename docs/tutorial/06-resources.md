@@ -157,37 +157,45 @@ To understand why `provide()` is special, let's look at how `yield*` normally be
 When you write `yield*`, control flows INTO the operation and doesn't come back until it completes:
 
 ```
-yield* useSocket()           useSocket()
-   │                            │
-   │ ─── control goes in ────>  │
-   │                            │  work...
-   │     (waiting...)           │  work...
-   │                            │  suspend() ⏸
-   │     (waiting forever)      │
-   v                            v
+main()                            useSocket() 
+  │                                  │
+  │                                  │ function* useSocket() {
+  │                                  │   try {
+  │  yield* useSocket() ──────────────────>│  connect...
+  │                                  │     │  wait...
+  │     (waiting...)                 │     │  yield* suspend() ⏸
+  │     (waiting forever)            │     │
+  │                                  │     │  return socket  ✗ never reached
+  │                                  │   } finally { cleanup }
+  │                                  │ }
+  v                                  v
 ```
 
-That's why our first attempt hung — `suspend()` never completes, so control never returns.
+That's why our first attempt hung — `yield* suspend()` never completes, so control never returns.
 
-`provide()` breaks this rule. It yields a value back *while keeping the operation alive*:
+`yield* provide(socket)` breaks this pattern. The `yield*` sends the socket back to the caller, but the resource keeps running:
 
 ```
-yield* useSocket()           useSocket()
-   │                            │
-   │ ─── control goes in ────>  │
-   │                            │  connect...
-   │                            │  wait...
-   │ <─── provide(socket) ────  │  still alive! ⏸
-   │                            │
-   │  socket.send('hello')      │  (suspended, waiting
-   │  socket.send('world')      │   for scope to end)
-   │                            │
-   │ ─── scope ends ──────────> │
-   │                            │  finally { cleanup }
-   v                            v
+main()                            useSocket() 
+  │                                  │
+  │                                  │ function useSocket() {
+  │                                  │   return resource(function*(provide) {
+  │                                  │     │
+  │  yield* useSocket() ──────────────────>│  connect...
+  │                                  │     │  wait...
+  │                                  │     │
+  │  <───────── socket ───────────────────── yield* provide(socket)
+  │                                  │     │
+  │  socket.send('hello')            │     │  ⏸ (suspended, still alive)
+  │  socket.send('world')            │     │
+  │                                  │     │
+  │  scope ends ───────────────────────────>  finally { cleanup }
+  │                                  │   })
+  │                                  │ }
+  v                                  v
 ```
 
-This is the key insight: **`provide()` returns a value to the caller while the resource keeps running in the background.** When the parent scope ends, the resource resumes from `provide()` and hits the `finally` block for cleanup.
+This is the key insight: **`yield* provide(value)` uses the yield to send a value back to the caller, while the resource keeps running in the background.** When the parent scope ends, the resource resumes from `provide()` and hits the `finally` block for cleanup.
 
 ---
 
