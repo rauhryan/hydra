@@ -39,6 +39,10 @@ By the end of this tutorial, you'll build a **multiplex HTTP proxy** that dynami
 
 ### Part 5: Capstone - Multiplex HTTP Proxy
 - [5.1 Architecture Overview](./12-capstone-architecture.md) - What we're building
+- [5.2 Express Server Resource](./13-capstone-server-resource.md) - Wrapping Express as a resource
+- [5.3 Server Pool](./14-capstone-server-pool.md) - Managing dynamic servers
+- [5.4 Switchboard](./15-capstone-switchboard.md) - Routing requests
+- [5.5 Final Assembly](./16-capstone-final.md) - Putting it all together
 
 ---
 

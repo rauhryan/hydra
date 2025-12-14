@@ -1,4 +1,4 @@
-# Capstone Part 1: Architecture Overview
+# Chapter 5.1: Capstone Architecture Overview
 
 We're going to build a **Multiplex HTTP Proxy** - a switchboard that dynamically spins up Express servers and routes requests to them based on hostname.
 
@@ -110,9 +110,9 @@ src/
 
 We'll implement each component step by step:
 
-1. [Express Server Resource](./12-capstone-server-resource.md)
-2. [Server Pool](./13-capstone-server-pool.md)
-3. [Switchboard](./14-capstone-switchboard.md)
-4. [Final Assembly](./15-capstone-final.md)
+1. [Express Server Resource](./13-capstone-server-resource.md)
+2. [Server Pool](./14-capstone-server-pool.md)
+3. [Switchboard](./15-capstone-switchboard.md)
+4. [Final Assembly](./16-capstone-final.md)
 
-Let's start with the [Express Server Resource](./12-capstone-server-resource.md).
+Let's start with the [Express Server Resource](./13-capstone-server-resource.md).
