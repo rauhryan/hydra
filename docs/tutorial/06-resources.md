@@ -482,4 +482,4 @@ await main(function*() {
 
 ## Next Up
 
-Resources can produce values via `provide()`, but what about ongoing streams of data? In Part 3, we'll learn about [Channels and Streams](./07-channels-streams.md) for pub/sub communication.
+Resources can produce values via `provide()`, but what about ongoing streams of data? In Part 3, we'll learn about [Channels](./07-channels.md) for communication between operations.

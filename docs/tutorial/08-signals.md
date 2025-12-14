@@ -1,18 +1,40 @@
-# Chapter 3.2: Signals - Events from Outside
+# Chapter 3.2: Signals - Bridging the Outside World
 
-Channels are great when both producer and consumer are inside Effection. But what about external events?
+Remember the `firstSuccess` combinator from [Chapter 05](./05-combinators.md)? We had a polling problem:
 
-- DOM events (clicks, key presses)
-- Node.js EventEmitter events
-- Callback-based APIs
+```typescript
+// The ugly solution - polling a variable
+while (!succeeded && failureCount < total) {
+  yield* sleep(10);  // Checking a variable in a loop... gross.
+}
+```
 
-The problem: `channel.send()` is an **operation** - you can only call it with `yield*`. But callbacks are plain JavaScript functions!
+And we solved it elegantly with something called `createSignal()`:
 
-Enter **Signals**.
+```typescript
+// The elegant solution - no polling!
+const success = createSignal<T, never>();
+// ...
+success.send(value);  // No yield*! Just a plain function call
+// ...
+for (const result of yield* each(success)) {
+  return result;
+}
+```
+
+But we never explained *why* this worked. Now let's understand Signals properly.
 
 ---
 
-## The Problem with Channels in Callbacks
+## The Problem: Callbacks Can't Yield
+
+In the last chapter, we saw that `channel.send()` is an operation - you need `yield*` to call it. But what about code that runs outside of generators?
+
+- DOM event handlers
+- Node.js EventEmitter callbacks  
+- setTimeout/setInterval callbacks
+- Promise `.then()` callbacks
+- Spawned tasks communicating back to their parent
 
 This doesn't work:
 
@@ -30,18 +52,18 @@ await main(function*() {
 });
 ```
 
-You can only use `yield*` inside a generator function. Event callbacks are regular functions.
+You can only use `yield*` inside a generator function. Callbacks are regular functions.
 
 ---
 
-## Signals: Callable from Plain JavaScript
+## Signals: Plain Functions That Bridge Worlds
 
 A **Signal** is like a Channel, but its `send()` method is a regular function, not an operation:
 
 ```typescript
 // signal-basics.ts
-import type { Operation, Signal } from 'effection';
-import { main, createSignal, spawn, sleep, each } from 'effection';
+import type { Signal } from 'effection';
+import { main, createSignal, each } from 'effection';
 
 await main(function*() {
   // Create a signal
@@ -71,6 +93,41 @@ Received: click 3
 Done
 ```
 
+**This is the key insight**: `signal.send()` doesn't need `yield*`. It's a plain JavaScript function that can be called from anywhere - callbacks, event handlers, spawned tasks, anywhere.
+
+---
+
+## Why firstSuccess Worked
+
+Now we can understand why the Chapter 05 solution worked:
+
+```typescript
+function* firstSuccess<T>(operations: (() => Operation<T>)[]): Operation<T> {
+  const success = createSignal<T, never>();
+
+  return yield* scoped(function* () {
+    for (const op of operations) {
+      yield* spawn(function* () {
+        try {
+          const value = yield* op();
+          success.send(value);  // <-- Called from inside a spawned task!
+        } catch {
+          // Ignore failures
+        }
+      });
+    }
+
+    for (const result of yield* each(success)) {
+      return result;
+    }
+
+    throw new Error('All operations failed');
+  });
+}
+```
+
+The spawned tasks can call `success.send(value)` without `yield*` because it's a Signal, not a Channel. This lets the child tasks communicate back to the parent without blocking.
+
 ---
 
 ## Signal vs Channel
@@ -81,6 +138,10 @@ Done
 | Can call in callbacks | No | Yes |
 | Use inside operations | `yield* channel.send()` | `signal.send()` |
 | Streaming consumption | Same | Same |
+
+**Rule of thumb**:
+- Both producer and consumer are Effection operations → **Channel**
+- Producer is a callback or external code → **Signal**
 
 ---
 

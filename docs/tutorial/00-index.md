@@ -29,7 +29,7 @@ By the end of this tutorial, you'll build a **multiplex HTTP proxy** that dynami
 - [2.3 Resources](./06-resources.md) - Long-running services
 
 ### Part 3: Communication - "Operations Talking to Each Other"
-- [3.1 Channels and Streams](./07-channels-streams.md) - Pub/sub messaging
+- [3.1 Channels](./07-channels.md) - Communication between operations
 - [3.2 Signals](./08-signals.md) - Events from callbacks
 - [3.3 Context](./09-context.md) - Sharing values down the tree
 
